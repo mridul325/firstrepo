@@ -1,7 +1,9 @@
 name: Hello World
 on:
  push:
-   branches: [main]
+   branches: ["main"]
+ pull_request:
+   branches: ["main"]
 
 jobs:
  demo:
