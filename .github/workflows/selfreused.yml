@@ -1,4 +1,4 @@
-name: Reusable Workflow SelfRunner
+name: Reusable Workflow SelfHost
 
 on:
  workflow_call: 
