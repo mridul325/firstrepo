@@ -1,0 +1,21 @@
+name: Context
+
+on:
+ workflow_dispatch
+
+jobs:
+ context1:
+  runs-on: ${{matrix.os}}
+  strategy:
+   fail-fast: false
+   matrix:
+     os: 
+      - ubuntu-latest 
+      - windows-latest
+     java-version: [17, 21,26]
+  steps:
+   - name: Setup Java JDK
+     uses: actions/setup-java@v5.0.0
+     with:
+      java-version: ${{matrix.java-version}}
+      distribution: microsoft
