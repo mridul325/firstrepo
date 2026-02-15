@@ -1,0 +1,148 @@
+name: Build (matrix with summarize)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: "Test (node: ${{ matrix.node-version }}, os: ${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20]
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix['node-version'] }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      # Mark start time (OS-specific)
+      - name: Mark start time (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        shell: bash
+        run: echo "START_MS=$(date +%s%3N)" >> $GITHUB_ENV
+
+      - name: Mark start time (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          Write-Output "START_MS=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" >> $env:GITHUB_ENV
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      # Compute duration + emit timing.json (OS-specific)
+      - name: Compute duration (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        id: timing_linux
+        shell: bash
+        run: |
+          END_MS=$(date +%s%3N)
+          DURATION_MS=$((END_MS-START_MS))
+          echo "duration_ms=$DURATION_MS"
+          cat > timing.json <<EOF
+          { "os": "${{ matrix.os }}", "node": "${{ matrix.node-version }}", "duration_ms": $DURATION_MS }
+          EOF
+
+      - name: Compute duration (Windows)
+        if: startsWith(matrix.os, 'windows')
+        id: timing_windows
+        shell: pwsh
+        run: |
+          $end=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+          $duration=[int64]$end - [int64]$env:START_MS
+          "duration_ms=$duration"
+          $json = @{ os = "${{ matrix.os }}"; node = "${{ matrix['node-version'] }}"; duration_ms = $duration } | ConvertTo-Json -Compress
+          $json | Set-Content -Path timing.json
+
+      - name: Upload timing artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: timing-node${{ matrix.node-version }}-${{ matrix.os }}
+          path: timing.json
+          if-no-files-found: error
+
+  summarize:
+    name: Summarize matrix durations
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    outputs:
+      fastest_duration_ms: ${{ steps.find_fastest.outputs.fastest_duration_ms }}
+      fastest_label: ${{ steps.find_fastest.outputs.fastest_label }}
+
+    steps:
+      - name: Download all timing artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: timing-*
+          merge-multiple: true
+
+      - name: Setup Node for summarization
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Show downloaded files
+        shell: bash
+        run: |
+          echo "Timing files:"
+          ls -1 *.json || true
+
+      - id: find_fastest
+        name: Compute and print durations
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const files = fs.readdirSync('.').filter(f => f.endsWith('.json'));
+          if (files.length === 0) {
+            console.error('No timing files found.');
+            process.exit(1);
+          }
+          const rows = files.map(f => {
+            const data = JSON.parse(fs.readFileSync(f, 'utf8'));
+            return { file: f, os: data.os, node: data.node, duration_ms: Number(data.duration_ms) };
+          });
+
+          // Print to logs
+          console.log('Durations:');
+          for (const r of rows) {
+            console.log(`- ${r.os} / Node ${r.node}: ${r.duration_ms} ms`);
+          }
+
+          // Find fastest
+          let fastest = rows[0];
+          for (const r of rows) {
+            if (r.duration_ms < fastest.duration_ms) fastest = r;
+          }
+
+          // Outputs for downstream jobs
+          const out = process.env.GITHUB_OUTPUT;
+          fs.appendFileSync(out, `fastest_duration_ms=${fastest.duration_ms}\n`);
+          fs.appendFileSync(out, `fastest_label=${fastest.os}-node${fastest.node}\n`);
+
+          // Nice markdown summary
+          const summaryLines = rows
+            .map(r => `- **${r.os} / Node ${r.node}** → \`${r.duration_ms} ms\``)
+            .join('\n');
+          const fastestLine = `\n**Fastest:** ${fastest.os} / Node ${fastest.node} → \`${fastest.duration_ms} ms\``;
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Matrix job durations\n${summaryLines}${fastestLine}\n`);
+          NODE
+
+      - name: Echo fastest result
+        shell: bash
+        run: |
+          echo "Fastest job: ${{ steps.find_fastest.outputs.fastest_label }}"
+          echo "Fastest duration (ms): ${{ steps.find_fastest.outputs.fastest_duration_ms }}"
+``
