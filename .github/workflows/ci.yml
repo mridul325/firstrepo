@@ -1,0 +1,33 @@
+
+on:
+  push:
+    branches:
+      - 'feature/**'     # trigger only on feature/* branches
+    paths:
+      - 'app/**'         # trigger only when files under app/ change
+    paths-ignore:
+      - 'docs/**'        # ignore doc-only changes
+      - '**/*.md'        # ignore markdown-only changes anywhere
+
+env:
+  NODE_ENV: ci           # global env var
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies (clean)
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
