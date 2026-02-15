@@ -2,7 +2,7 @@ name: example-workflow
 on: [push]
 jobs:
   production-deploy:
-    if: ${{ github.repository == 'mridul325/firstrepo' }}
+    if: ${{ github.repository == 'mridul325/firstrepowrong' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
